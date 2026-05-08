@@ -1,9 +1,14 @@
-import wandb
+
+import sys
+import os
+import numpy as np
 import torch
-import torch.nn 
-import torchvision
-import torchvision.transforms as transforms
-from models.models import *
+from torch.utils.data import Subset
+from torchvision import transforms
+from pycocotools.coco import COCO
+from PIL import Image
+import torchvision.datasets as datasets
+"""
 
 def get_data(slice=1, train=True):
     full_dataset = torchvision.datasets.MNIST(root=".",
@@ -16,14 +21,12 @@ def get_data(slice=1, train=True):
     
     return sub_dataset
 
-
 def make_loader(dataset, batch_size):
     loader = torch.utils.data.DataLoader(dataset=dataset,
                                          batch_size=batch_size, 
                                          shuffle=True,
                                          pin_memory=True, num_workers=2)
     return loader
-
 
 def make(config, device="cuda"):
     # Make the data
@@ -40,3 +43,83 @@ def make(config, device="cuda"):
         model.parameters(), lr=config.learning_rate)
     
     return model, train_loader, test_loader, criterion, optimizer
+"""
+
+
+def get_data(slice=1, train=True):
+
+    if train:
+        root = "/home/datasets/coco/train2017"
+        annFile = "/home/datasets/coco/annotations/instances_train2017.json"
+    else:
+        root = "/home/datasets/coco/val2017"
+        annFile = "/home/datasets/coco/annotations/instances_val2017.json"
+
+    coco = COCO(annFile)
+
+    # carregar dataset base
+    full_dataset = datasets.CocoDetection(
+        root=root,
+        annFile=annFile,
+        transform=transforms.ToTensor()
+    )
+
+    person_id = 1  # COCO = person
+
+    def make_sample(idx):
+        image, anns = full_dataset[idx]
+
+        h, w = image.shape[1], image.shape[2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        for ann in anns:
+            if ann["category_id"] == person_id:
+                mask = np.maximum(mask, coco.annToMask(ann))
+
+        mask = torch.tensor(mask, dtype=torch.float32)
+
+        return image, mask
+
+    # wrapper dataset simple
+    class Wrapped(torch.utils.data.Dataset):
+        def __init__(self, n):
+            self.n = n
+
+        def __len__(self):
+            return self.n
+
+        def __getitem__(self, idx):
+            return make_sample(idx)
+
+    dataset = Wrapped(len(full_dataset))
+
+    # subsampling com el teu MNIST
+    sub_dataset = Subset(
+        dataset,
+        indices=range(0, len(dataset), slice)
+    )
+
+    return sub_dataset
+
+def make_loader(dataset, batch_size):
+    loader = torch.utils.data.DataLoader(dataset=dataset,
+                                         batch_size=batch_size, 
+                                         shuffle=True,
+                                         pin_memory=True, num_workers=2)
+    return loader
+
+
+#dataset_train = get_data(slice=1, train=True)
+dataset_val = get_data(slice=1, train=False)
+
+#print(len(dataset_train))
+print(len(dataset_val))
+
+#mitjana dimencions imatges validació
+total_h, total_w = 0, 0
+for img, _ in dataset_val:
+    total_h += img.shape[1]
+    total_w += img.shape[2]
+
+print("Mitjana alçada:", total_h / len(dataset_val))
+print("Mitjana amplada:", total_w / len(dataset_val))
